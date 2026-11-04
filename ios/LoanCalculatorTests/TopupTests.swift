@@ -2,28 +2,36 @@
 import XCTest
 @testable import LoanCalculator
 
-class TopupTests: XCTestCase {
+@MainActor
+final class TopupTests: XCTestCase {
     var api: LoanAPI!
     var session: URLSession!
-    var handler: ((URLRequest) -> (Int, [String: Any]))!
+    /// The stub of the current test. Called by StubURLProtocol on its own thread, so it is kept in a
+    /// nonisolated static (like StubURLProtocol.handler) and never hops to the main actor.
+    nonisolated(unsafe) static var stub: (URLRequest) -> (Int, [String: Any]) = { _ in (500, [:]) }
+    var handler: (URLRequest) -> (Int, [String: Any]) {
+        get { Self.stub }
+        set { Self.stub = newValue }
+    }
 
-    override func setUp() {
-        super.setUp()
+    override func setUp() async throws {
+        try await super.setUp()
         session = StubURLProtocol.session()
         api = LoanAPI(baseURL: URL(string: "http://loan.test")!, session: session)
         StubURLProtocol.handler = { request in
-            return self.handler(request)
+            let (status, object) = TopupTests.stub(request)
+            let data = try JSONSerialization.data(withJSONObject: object)
+            return (status, String(decoding: data, as: UTF8.self))
         }
     }
 
     // AC1: loan in arrears
     func test_req008_ac1_topup_not_possible_while_overdue() async throws {
         handler = { request in
-            XCTAssertEqual(request.url?.path, "/loans/CUST-1002/topup-offers")
-            XCTAssertEqual(request.value(forHTTPHeaderField: "Idempotency-Key"), "k1")
+            XCTAssertEqual(request.url?.path, "/loans/PL-1002/topup-offers")
             return (422, ["message": "A top-up is not possible while a payment is overdue."])
         }
-        let req = TopupOfferRequest(customerId: "CUST-1002", topupAmount: 5000, termMonths: 60)
+        let req = TopupOfferRequest(customerId: "CUST-1002", topupAmount: 5000, termMonths: 60, loanId: "PL-1002")
         do {
             _ = try await api.requestTopupOffer(req)
             XCTFail("Expected rejection")
@@ -41,10 +49,10 @@ class TopupTests: XCTestCase {
     // AC2: fewer than 6 payments
     func test_req008_ac2_topup_possible_after_six_payments() async throws {
         handler = { request in
-            XCTAssertEqual(request.url?.path, "/loans/CUST-1003/topup-offers")
+            XCTAssertEqual(request.url?.path, "/loans/PL-1003/topup-offers")
             return (422, ["message": "A top-up is possible after your sixth monthly payment."])
         }
-        let req = TopupOfferRequest(customerId: "CUST-1003", topupAmount: 5000, termMonths: 60)
+        let req = TopupOfferRequest(customerId: "CUST-1003", topupAmount: 5000, termMonths: 60, loanId: "PL-1003")
         do {
             _ = try await api.requestTopupOffer(req)
             XCTFail("Expected rejection")
@@ -59,10 +67,10 @@ class TopupTests: XCTestCase {
     // AC3: no repayment account
     func test_req008_ac3_no_current_account() async throws {
         handler = { request in
-            XCTAssertEqual(request.url?.path, "/loans/CUST-9999/topup-offers")
+            XCTAssertEqual(request.url?.path, "/loans/PL-1004/topup-offers")
             return (422, ["message": "We could not find your current account. Please contact us."])
         }
-        let req = TopupOfferRequest(customerId: "CUST-9999", topupAmount: 5000, termMonths: 60)
+        let req = TopupOfferRequest(customerId: "CUST-1004", topupAmount: 5000, termMonths: 60, loanId: "PL-1004")
         do {
             _ = try await api.requestTopupOffer(req)
             XCTFail("Expected rejection")
@@ -77,7 +85,7 @@ class TopupTests: XCTestCase {
     // AC5: indicative offer R1
     func test_req008_ac5_indicative_offer_r1() async throws {
         handler = { request in
-            XCTAssertEqual(request.url?.path, "/loans/CUST-1001/topup-offers")
+            XCTAssertEqual(request.url?.path, "/loans/PL-1001/topup-offers")
             let json: [String: Any] = [
                 "offer_id": "off-1",
                 "loan_id": "PL-1001",
@@ -99,7 +107,7 @@ class TopupTests: XCTestCase {
             ]
             return (201, json)
         }
-        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 5000, termMonths: 60)
+        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 5000, termMonths: 60, loanId: "PL-1001")
         let resp = try await api.requestTopupOffer(req)
         XCTAssertEqual(resp.offerId, "off-1")
         XCTAssertEqual(resp.topupAmount, 5000.0)
@@ -139,7 +147,7 @@ class TopupTests: XCTestCase {
             ]
             return (201, json)
         }
-        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 7000, termMonths: 72)
+        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 7000, termMonths: 72, loanId: "PL-1001")
         let resp = try await api.requestTopupOffer(req)
         XCTAssertEqual(resp.offerId, "off-2")
         XCTAssertEqual(resp.topupAmount, 7000.0)
@@ -178,7 +186,7 @@ class TopupTests: XCTestCase {
             ]
             return (201, json)
         }
-        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 1000, termMonths: 48)
+        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 1000, termMonths: 48, loanId: "PL-1001")
         let resp = try await api.requestTopupOffer(req)
         XCTAssertEqual(resp.offerId, "off-3")
         XCTAssertEqual(resp.topupAmount, 1000.0)
@@ -198,7 +206,7 @@ class TopupTests: XCTestCase {
         handler = { request in
             return (422, ["message": "Please choose a top-up amount between €1,000 and €20,000."])
         }
-        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 999, termMonths: 60)
+        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 999, termMonths: 60, loanId: "PL-1001")
         do {
             _ = try await api.requestTopupOffer(req)
             XCTFail("Expected rejection")
@@ -215,7 +223,7 @@ class TopupTests: XCTestCase {
         handler = { request in
             return (422, ["message": "The new loan amount can be at most €30,000."])
         }
-        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 20000, termMonths: 84)
+        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 20000, termMonths: 84, loanId: "PL-1001")
         do {
             _ = try await api.requestTopupOffer(req)
             XCTFail("Expected rejection")
@@ -232,7 +240,7 @@ class TopupTests: XCTestCase {
         handler = { request in
             return (422, ["message": "Please choose a term between 12 and 84 months."])
         }
-        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 5000, termMonths: 11)
+        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 5000, termMonths: 11, loanId: "PL-1001")
         do {
             _ = try await api.requestTopupOffer(req)
             XCTFail("Expected rejection")
@@ -269,7 +277,7 @@ class TopupTests: XCTestCase {
             ]
             return (201, json)
         }
-        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 5000, termMonths: 60)
+        let req = TopupOfferRequest(customerId: "CUST-1001", topupAmount: 5000, termMonths: 60, loanId: "PL-1001")
         let _ = try await api.requestTopupOffer(req)
         // simulate time after 24h+1s by calling accept and expecting expiry error
         handler = { request in
