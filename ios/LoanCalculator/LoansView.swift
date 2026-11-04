@@ -17,6 +17,9 @@ struct LoansView: View {
                                 .font(row.weight == .headline ? .headline : .body)
                                 .accessibilityIdentifier(row.id)
                         }
+                        // REQ-008: top up this loan.
+                        NavigationLink("Top up this loan") { TopupView(loan: loan) }
+                            .accessibilityIdentifier("topup-\(loan.loanId)")
                     }
                 }
             }
