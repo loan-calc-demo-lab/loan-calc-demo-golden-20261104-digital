@@ -1,0 +1,9 @@
+// Shared settings for the LoanCalculator app target.
+// API address used by the app ("$()" stops "//" being read as a comment).
+LOAN_API_BASE_URL = http:/$()/localhost:8080
+
+// Personal settings (signing team, API address for a real iPhone) go in
+// Config/Local.xcconfig, which is not committed. Example:
+//   DEVELOPMENT_TEAM = ABCDE12345
+//   LOAN_API_BASE_URL = https:/$()/loan-api.example.com
+#include? "Local.xcconfig"

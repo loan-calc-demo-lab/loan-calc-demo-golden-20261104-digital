@@ -1,0 +1,29 @@
+name: ios
+# Runs only when the iOS app changes: macOS runner minutes count 10x on private repos.
+on:
+  workflow_dispatch:
+  pull_request:
+    paths: ['ios/**', '.github/workflows/ios.yml']
+  push:
+    branches: [main]
+    paths: ['ios/**', '.github/workflows/ios.yml']
+jobs:
+  ios:
+    name: iOS (Swift)
+    runs-on: macos-latest
+    timeout-minutes: 20
+    defaults: { run: { working-directory: ios } }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Xcode and simulator
+        run: |
+          xcodebuild -version
+          SIM=$(xcrun simctl list devices available | grep -m1 -oE 'iPhone [^(]+' | sed 's/ *$//')
+          echo "Using simulator: $SIM"
+          echo "SIM=$SIM" >> "$GITHUB_ENV"
+      - name: Test
+        run: |
+          xcodebuild test -project LoanCalculator.xcodeproj -scheme LoanCalculator \
+            -destination "platform=iOS Simulator,name=$SIM" \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO | tee xcodebuild.log | grep -E "Test Case .*(passed|failed)|error:|\*\* TEST"
+          exit ${PIPESTATUS[0]}
